@@ -1,0 +1,20 @@
+{
+  "_comment": "Known virtual (delivery-only) restaurant brands and the kitchen that typically cooks for them. Used as one signal for ghost-kitchen detection. Edit freely.",
+  "brands": [
+    { "name": "MrBeast Burger", "operator": "Virtual Dining Concepts (cooked in partner restaurants' kitchens)" },
+    { "name": "It's Just Wings", "operator": "Chili's / Maggiano's (Brinker)" },
+    { "name": "Pasqually's Pizza & Wings", "operator": "Chuck E. Cheese" },
+    { "name": "The Burger Den", "operator": "Denny's" },
+    { "name": "The Meltdown", "operator": "Denny's" },
+    { "name": "Cosmic Wings", "operator": "Applebee's" },
+    { "name": "Neighborhood Wings", "operator": "Applebee's" },
+    { "name": "Thighstop", "operator": "Wingstop" },
+    { "name": "Tender Shack", "operator": "Outback Steakhouse (Bloomin' Brands)" },
+    { "name": "Conviction Chicken", "operator": "TGI Fridays" },
+    { "name": "Wild Burger", "operator": "Buffalo Wild Wings" },
+    { "name": "Guy Fieri's Flavortown Kitchen", "operator": "Virtual Dining Concepts" },
+    { "name": "Mariah's Cookies", "operator": "Virtual Dining Concepts" },
+    { "name": "Twisted Tenders", "operator": "Logan's Roadhouse" },
+    { "name": "Burger Shack", "operator": "Red Robin virtual brand (verify locally)" }
+  ]
+}
