@@ -1,6 +1,6 @@
 # Food Concierge: Phase 0 (research spike + plan)
 
-Status: **awaiting review**. No code yet.
+Status: **reviewed**. Decisions are recorded in §7. Phase 1 is built.
 Date of research: 2026-11-11.
 
 Research caveat: this sandbox could run web searches but could not open provider pages directly (developer.uber.com, techcrunch.com and others were blocked by the session network). Findings below come from search-result summaries of official docs and press coverage. Items marked **(verify)** need a direct read of the source before we rely on them.
@@ -76,7 +76,7 @@ A token the *model* can request and then pass back doesn't prove the *user* said
 - A `request_confirmation(cart_id)` step asks the user **directly, outside the model**:
   1. **Preferred:** MCP **elicitation** (`elicitation/create`). The client shows the user a prompt with the itemized total and they click Yes or No. The model never sees or produces the yes.
   2. **Fallback** for clients without elicitation: open a local page (`http://127.0.0.1:<port>/confirm/<id>`) in the already-visible browser showing the itemized total with a Confirm button.
-- Only then does the server mint a token: HMAC-signed, single-use, bound to `cart_id + quote_hash`, 5-minute expiry. Any cart or price change invalidates it.
+- Only then does the server mint a token: random, single-use, held in memory only, bound to `cart_id + quote_hash`, 5-minute expiry. Any cart or price change invalidates it.
 - `open_checkout` (the v1 default) only hands off. The user still taps "Place order" themselves.
 - `place_order` sits behind `MUNCH_ENABLE_PLACE_ORDER=1`, which is off by default. It re-quotes before submitting and refuses if the total moved.
 
@@ -199,6 +199,25 @@ Big risks, in order: (1) ToS / account suspension, (2) bot checks blocking autom
 9. **OpenAI harness.** OK with the JS Agents SDK (`@openai/agents`) so everything stays TypeScript? Or do you want Python?
 
 ---
+
+## 7. Decisions (from review, 2026-11-11)
+
+| Question | Decision |
+|---|---|
+| Distribution | Will be published on GitHub for others to use. So: clear ToS warnings in the README and at connect time, no bot-detection evasion, official APIs preferred wherever access is granted. |
+| Region | US only for now. |
+| Login | In a real browser window opened from the AI client. The user signs in themselves. |
+| Real carts | Yes, build real carts on each app. |
+| Reading menus and prices | Allowed. |
+| Tip | Ask the user. The server never chooses a tip; without one, totals are labeled "before tip". The user can ask to have their tip remembered. |
+| Ghost kitchens | Ask the user's preference once and save it. Flagged places are always labeled with the reasons, whether hidden or shown. |
+
+Still open (defaults in use until you say otherwise):
+- **Session encryption:** Option A (browser profile + our encrypted store).
+- **Official API access:** not applied for yet. Applying for the DoorDash MCP beta and Uber Consumer Delivery access is recommended before publishing.
+- **Ghost-kitchen web lookup:** off. Detection is fully offline for now.
+- **OpenAI harness:** TypeScript (`@openai/agents`).
+- **Your OS:** unknown. Needed for Phase 2 browser and keychain testing.
 
 ## Sources
 - [About DoorDash MCP](https://developer.doordash.com/en-US/docs/mcp/overview/about_mcp/) · [DoorDash MCP & CLI](https://developer.doordash.com/en-US/mcp/) · [DoorDash ordering connector announcement](https://about.doordash.com/en-us/news/doordash-ordering-connector) · [Kingy AI: DoorDash MCP beta](https://kingy.ai/news/doordash-mcp-corporate-ordering-beta/)
