@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { LoginFlow, type SiteLogin } from "../src/browser/login.js";
-import { Recorder } from "../src/browser/recorder.js";
+import { loadRecording, prune, Recorder, urlPattern, writeRecording } from "../src/browser/recorder.js";
 import { scrubAll, shape } from "../src/browser/scrub.js";
 import { BrowserSessions } from "../src/browser/sessions.js";
 import { EncryptedStore } from "../src/storage/encryptedStore.js";
@@ -42,6 +42,45 @@ describe("scrubbing personal data from recordings", () => {
     const s = JSON.stringify(shape(doc));
     expect(s).not.toMatch(/Jane|Thai|1500|Wallaby/);
     expect(shape({ a: [{ x: 1 }, { y: "s" }], b: null })).toEqual({ a: [{ x: "number", y: "string" }, "×2"], b: "null" });
+  });
+});
+
+describe("scrubbing shapes seen on the real site", () => {
+  const doc = {
+    data: {
+      shoppingCart: { creatorName: "Jane D.", groupedItems: [{ name: "Jane D.", consumerUuid: "c-1", items: [{ title: "Pad Thai", price: 1500 }] }] },
+      selectedInstruction: { notes: "Gate code 4411", businessName: "Acme Tower", waypoint: { latitude: 40.111111, longitude: -73.222222 }, displayString: "Leave at door" },
+      checkoutPayloads: { locationInfo: { address: { title: "42 Wallaby Way", subtitle: { text: "Brooklyn, NY 11201" } } }, fareBreakdown: { charges: [{ title: { text: "Delivery Fee" }, value: { text: "$0.49" } }] } },
+      deliveryAddress: { reference: "ChIJplaceid12345", address: { eaterFormattedAddress: "42 Wallaby Way, Brooklyn" } },
+      customerInfos: [{ firstName: "Jane", nickName: "JD-nick" }],
+      searchHistory: [{ title: "late night ramen" }],
+    },
+  };
+  const [clean] = scrubAll([doc]) as [typeof doc];
+  const text = JSON.stringify(clean);
+
+  it("removes names, door notes, exact location and place references", () => {
+    expect(text).not.toMatch(/Jane|Gate code|Acme|40\.111111|73\.222222|Wallaby|ChIJ|JD-nick|c-1|late night ramen|Leave at door|11201/);
+  });
+
+  it("keeps cart items and fee lines", () => {
+    expect(clean.data.shoppingCart.groupedItems[0]!.items[0]).toEqual({ title: "Pad Thai", price: 1500 });
+    expect(clean.data.checkoutPayloads.fareBreakdown.charges[0]).toEqual({ title: { text: "Delivery Fee" }, value: { text: "$0.49" } });
+  });
+});
+
+describe("report helpers", () => {
+  it("urlPattern hides ids, store names and query values", () => {
+    expect(urlPattern("https://www.ubereats.com/store/thai-orchid-smith-st/AbCdEfGhIjKlMnOpQrStUv?diningMode=DELIVERY&pl=xyz")).toBe("https://www.ubereats.com/store/:slug/:id?diningMode=…&pl=…");
+    expect(urlPattern("https://www.ubereats.com/search?q=thai")).toBe("https://www.ubereats.com/search?q=…");
+  });
+
+  it("prune shortens arrays, long strings and id-keyed maps, and drops unwanted keys", () => {
+    const out = prune({ a: [1, 2, 3, 4], s: "x".repeat(200), imageUrl: "u", map: { "11111111-2222-3": 1, "22222222-3333-4": 2, "33333333-4444-5": 3, "44444444-5555-6": 4 } }, /image/i) as any;
+    expect(out.a).toEqual([1, 2, "…(4 total)"]);
+    expect(out.s.length).toBe(141);
+    expect(out.imageUrl).toBeUndefined();
+    expect(Object.keys(out.map)).toHaveLength(4);
   });
 });
 
@@ -112,25 +151,30 @@ describe("browser sign-in and recording (headless, against a fake site)", () => 
     expect((await flow.status()).status).toBe("expired");
   }, 30_000);
 
-  it("records the page's own JSON, and saves scrubbed copies and a values-free report", async (t) => {
+  it("records the page's own JSON and page structure, even if the user never marks a step", async (t) => {
     if (!available) return t.skip();
     const ctx = await browsers.context("ubereats");
-    const rec = new Recorder(ctx, new RegExp(`^${origin}/_p/api/`));
+    const rec = new Recorder(ctx, new RegExp(`^${origin}/_p/api/`), 100);
     rec.setStep("2-search");
     const page = await browsers.page("ubereats");
-    await page.goto(origin + "/");
+    await page.goto(origin + "/?q=thai");
     await page.waitForSelector("body[data-loaded]");
-    await rec.snapshot(page);
+    await new Promise((r) => setTimeout(r, 400)); // the automatic snapshot fires after the page settles
     await rec.settle();
     expect(rec.count).toBe(1);
 
     const out = join(dir, "rec");
-    const report = readFileSync(await rec.save(out, { site: "fake" }), "utf8");
+    const opts = { samples: [{ endpoint: /getFeedV1$/, part: "response" as const, paths: ["data.feedItems"] }], dropKeys: /rating/ };
+    const report = readFileSync(await rec.save(out, { site: "fake" }, opts), "utf8");
     expect(report).toContain("POST /_p/api/getFeedV1");
+    expect(report).toContain(`| POST /_p/api/getFeedV1 | 1 | ${origin}/?q=… |`);
     expect(report).toContain("`store-card`");
     expect(report).toContain("Service Fee $6.45");
+    expect(report).toContain("`Checkout`");
     expect(report).toContain('"firstName": "string"');
-    expect(report).not.toMatch(/Jane|jane@example|Thai Orchid/);
+    // Example values: only the allowed part, scrubbed, without dropped keys.
+    expect(report).toContain('"title": "Thai Orchid"');
+    expect(report).not.toMatch(/Jane|jane@example|4\.7/);
 
     const file = readdirSync(join(out, "scrubbed")).find((f) => f.startsWith("2-search"))!;
     const clean = readFileSync(join(out, "scrubbed", file), "utf8");
@@ -138,6 +182,11 @@ describe("browser sign-in and recording (headless, against a fake site)", () => 
     expect(clean).not.toMatch(/Jane|jane@example/);
     expect(readFileSync(join(out, "scrubbed", "_pages.json"), "utf8")).not.toContain("Jane");
     expect(readFileSync(join(out, "raw-PRIVATE-do-not-share", file), "utf8")).toContain("Jane");
+
+    // The report can be rebuilt later from the saved recording.
+    const again = await loadRecording(out);
+    expect(again.captures).toHaveLength(1);
+    expect(readFileSync(await writeRecording(out, again.captures, again.snapshots, { rebuilt: true }, opts), "utf8")).toContain('"title": "Thai Orchid"');
   }, 30_000);
 
   it("disconnecting deletes the browser profile", async (t) => {

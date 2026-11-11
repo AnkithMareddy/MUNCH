@@ -186,7 +186,8 @@ npm run record -- ubereats
 
 A browser window opens and the script walks you through five steps (sign in, search, open a restaurant, add an item, open checkout). You do every click; the script only listens to the data the page loads. **Do not place an order.** Output goes to `.munch-recordings/` (git-ignored):
 
-- `report.md`: field names, types and page hooks, no response values. This is what to share.
+- `report.md`: field names, types, page hooks, and a few example values from restaurant, menu and fee data. This is what to share. On macOS it is copied to your clipboard when the recording ends.
+- To rebuild the report from the last recording without recording again: `npm run record -- ubereats --report`
 - `scrubbed/`: responses with personal data removed. Check before sharing.
 - `raw-PRIVATE-do-not-share/`: untouched copies. Keep these on your machine.
 

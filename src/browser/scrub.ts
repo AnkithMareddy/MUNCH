@@ -4,11 +4,11 @@
  * public and are kept. Anything about the signed-in person is not.
  */
 const PERSONAL_KEY =
-  /^(first|last|full|display|given|family)?_?name$|email|phone|mobile|password|token|jwt|csrf|cookie|session|secret|signature|authorization|address|street|apt|suite|zip|postal|birth|card|payment|billing|wallet|credit|avatar|picture|photo|^(user|eater|customer|client|consumer|rider|account|person|profile|device|tenancy)(_?(uu)?id)?$|(user|eater|customer|consumer|rider|account|device)_?(uu)?id$|instructions|^note(s)?$|referral|invite|^ip$/i;
+  /^(first|last|full|display|given|family|nick|creator|eater|customer|user|participant|business)?_?name$|email|phone|mobile|password|token|jwt|csrf|cookie|session|secret|signature|authorization|address|street|apt|suite|zip|postal|birth|card|payment|billing|wallet|credit|balance|voucher|avatar|picture|photo|^(user|eater|customer|client|consumer|rider|account|person|profile|device|tenancy)(_?(uu)?id)?$|(user|eater|customer|consumer|rider|account|device|participant|profile)_?(uu)?id$|instruction|^note(s)?$|referral|invite|^ip$|^reference$|display_?string|fingerprint/i;
 /** Under these, "name" and "address" belong to a restaurant, which is public. */
 const PUBLIC_CONTEXT = /store|restaurant|merchant|vendor|item|menu|catalog|section|category|product|brand|cuisine|option|modifier|customization|feed|carousel|promo|badge|fee|fare|charge/i;
 /** Under these, coordinates point at the user. */
-const PERSONAL_CONTEXT = /deliver|eater|user|customer|consumer|dropoff|drop_off|target|destination|current|home|work|profile|account|saved|recent|shipping|billing/i;
+const PERSONAL_CONTEXT = /deliver|eater|user|customer|consumer|dropoff|drop_off|target|destination|current|home|work|profile|account|saved|recent|shipping|billing|locationInfo|instruction|waypoint|participant|creator|neutralZone|searchHistory/i;
 const COORD_KEY = /^(lat|lng|lon|long|latitude|longitude)$/i;
 const NAMEISH = /^(title|subtitle|label|text|name|address|street|formatted_?address|address1|address_?line_?\d?)$/i;
 
