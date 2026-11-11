@@ -69,11 +69,20 @@ export function registerShoppingTools(server: McpServer, ctx: AppContext): void 
           skipped.push({ provider: a.id, reason: s.status === "expired" ? "session expired: reconnect" : "not connected" });
           continue;
         }
-        found = found.concat(await cachedSearch(ctx, a, criteria));
-        // The unfiltered nearby list lets the ghost-kitchen check see every brand at an address.
-        nearby = nearby.concat(await cachedSearch(ctx, a, { address: criteria.address, mode: criteria.mode }));
-        searched.push(a.id);
+        // One app failing must not sink the whole search.
+        try {
+          const hits = await cachedSearch(ctx, a, criteria);
+          // The unfiltered nearby list lets the ghost-kitchen check see every brand at an address.
+          const around = await cachedSearch(ctx, a, { address: criteria.address, mode: criteria.mode });
+          found = found.concat(hits);
+          nearby = nearby.concat(around);
+          searched.push(a.id);
+        } catch (e) {
+          skipped.push({ provider: a.id, reason: e instanceof Error ? e.message : "search failed" });
+        }
       }
+      if (searched.length === 0 && skipped.some((s) => !/not connected|expired/.test(s.reason)))
+        throw new ToolError("search_failed", `Search failed on every connected app: ${skipped.map((s) => `${s.provider}: ${s.reason}`).join("; ")}`, "Tell the user what failed.");
       if (searched.length === 0)
         throw new ToolError("no_connected_providers", "No delivery app is connected, so there is nothing to search.", "Ask the user which apps they use, then call connect_provider for each.");
 

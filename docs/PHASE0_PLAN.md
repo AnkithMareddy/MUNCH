@@ -219,6 +219,15 @@ Still open (defaults in use until you say otherwise):
 - **OpenAI harness:** TypeScript (`@openai/agents`).
 - **Your OS:** unknown. Needed for Phase 2 browser and keychain testing.
 
+## 8. Phase 2 approach (Uber Eats)
+
+The live site can't be reached from the development sandbox, so Phase 2 is split:
+
+- **2a (done):** visible-browser session manager (the user's installed Chrome, one profile per app, no stealth or CAPTCHA handling), sign-in flow that only watches for the signed-in state, session expiry detection, sign-out that deletes the profile, a recording tool (`npm run record -- ubereats`) and a PII scrubber. All tested headless against a fake local site.
+- **2b (next):** search, menu, cart, quote and checkout handoff, written against a real recording.
+
+Assumptions in `src/providers/ubereats/site.ts` are marked UNVERIFIED until a recording confirms them: the login URL, the internal API path pattern, and the cookie that signals a signed-in session.
+
 ## Sources
 - [About DoorDash MCP](https://developer.doordash.com/en-US/docs/mcp/overview/about_mcp/) · [DoorDash MCP & CLI](https://developer.doordash.com/en-US/mcp/) · [DoorDash ordering connector announcement](https://about.doordash.com/en-us/news/doordash-ordering-connector) · [Kingy AI: DoorDash MCP beta](https://kingy.ai/news/doordash-mcp-corporate-ordering-beta/)
 - [DoorDash Drive: get production access](https://developer.doordash.com/docs/drive/how_to/get_production_access)

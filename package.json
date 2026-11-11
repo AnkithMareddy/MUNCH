@@ -24,11 +24,13 @@
     "test:watch": "vitest",
     "harness:smoke": "tsx harness/smoke.ts",
     "harness:claude": "tsx harness/chat.ts --llm claude",
-    "harness:openai": "tsx harness/chat.ts --llm openai"
+    "harness:openai": "tsx harness/chat.ts --llm openai",
+    "record": "tsx scripts/record.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.32.2",
     "@napi-rs/keyring": "^2.1.2",
+    "playwright": "^1.63.0",
     "zod": "^4.6.7"
   },
   "devDependencies": {

@@ -1,5 +1,6 @@
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { AppContext } from "../context.js";
+import { ToolError } from "../core/errors.js";
 import { fmt } from "../core/money.js";
 import type { ProviderId, Quote } from "../core/types.js";
 import type { ProviderAdapter } from "../providers/ProviderAdapter.js";
@@ -9,12 +10,7 @@ export function ok(data: unknown, text?: string): CallToolResult {
   return { content: [{ type: "text", text: (text ? text + "\n\n" : "") + JSON.stringify(data, null, 2) }] };
 }
 
-/** An error the model can act on: what went wrong and what to do next. */
-export class ToolError extends Error {
-  constructor(public code: string, message: string, public next_step?: string) {
-    super(message);
-  }
-}
+export { ToolError };
 
 export function fail(e: unknown): CallToolResult {
   const body =

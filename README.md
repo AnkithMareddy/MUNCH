@@ -4,7 +4,7 @@
 
 MUNCH is a free, open-source add-on for AI assistants (Claude, OpenAI agents, and anything else that supports [MCP](https://modelcontextprotocol.io)). It runs on your own computer.
 
-> **Status: early preview.** The full experience works today against two built-in **demo apps with fake data** (MockEats and MockDash), so you can try the conversation end to end. Support for real apps (Uber Eats, DoorDash, Grubhub, Postmates) is in development and not available yet. See the [roadmap](#roadmap).
+> **Status: early preview.** The full experience works today against two built-in **demo apps with fake data** (MockEats and MockDash), so you can try the conversation end to end. Real apps are not usable yet. **Uber Eats is in progress:** browser sign-in is built, and search, menus, carts and pricing come next. DoorDash, Grubhub and Postmates follow. See the [roadmap](#roadmap).
 
 ## Why this is useful
 
@@ -127,7 +127,8 @@ These rules are enforced by the server itself, not left to the AI model:
 |---|---|---|
 | 0 | Research and plan ([`docs/PHASE0_PLAN.md`](docs/PHASE0_PLAN.md)) | Done |
 | 1 | Server, demo apps, comparison, safe checkout flow | Done |
-| 2 | Uber Eats | Next |
+| 2a | Uber Eats: browser layer, sign-in, session checks, recording tool | Done |
+| 2b | Uber Eats: search, menus, cart, itemized quote, checkout handoff | In progress |
 | 3 | DoorDash, Grubhub, Postmates (de-duplicated against Uber Eats) | Planned |
 | 4 | Tuning restaurant matching and ghost-kitchen detection on real data | Planned |
 | 5 | Hardening: session expiry, breakage detection, recorded test fixtures | Planned |
@@ -171,8 +172,23 @@ Prompt: `concierge_intake`.
 |---|---|---|
 | `MUNCH_ENABLE_PLACE_ORDER` | off | `1` enables `place_order` |
 | `MUNCH_MOCK` | on | `0` hides the demo providers |
+| `MUNCH_EXPERIMENTAL` | off | `ubereats` switches on the unfinished Uber Eats provider (sign-in only for now) |
 | `MUNCH_DATA_DIR` | OS app-data folder | Where encrypted files live |
 | `MUNCH_LOG` | on | `silent` turns off logs |
+
+### Recording a real site (for adapter development)
+
+Adapters are written and tested against recordings of what a site's pages and data really look like. To make one:
+
+```bash
+npm run record -- ubereats
+```
+
+A browser window opens and the script walks you through five steps (sign in, search, open a restaurant, add an item, open checkout). You do every click; the script only listens to the data the page loads. **Do not place an order.** Output goes to `.munch-recordings/` (git-ignored):
+
+- `report.md`: field names, types and page hooks, no response values. This is what to share.
+- `scrubbed/`: responses with personal data removed. Check before sharing.
+- `raw-PRIVATE-do-not-share/`: untouched copies. Keep these on your machine.
 
 ### Adding a delivery app
 
@@ -187,7 +203,9 @@ Nothing in `src/core` or `src/tools` needs to change. Adapter rules: never touch
 ```
 src/core/        types, cart mapping, quote assembly, confirmation tokens
 src/core/compare restaurant matching, ghost-kitchen detection, ranking
-src/providers/   ProviderAdapter interface, registry, mock provider
+src/providers/   ProviderAdapter interface, registry, mock provider, ubereats (in progress)
+src/browser/     visible browser sessions, sign-in flow, recorder, PII scrubbing
+scripts/         record.ts: capture a real site for adapter development
 src/storage/     keychain key, encrypted store, preferences, sessions
 src/tools/       MCP tools
 src/prompts/     the intake guide

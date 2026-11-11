@@ -1,5 +1,6 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { BrowserSessions } from "./browser/sessions.js";
 import { ConfirmationService } from "./core/confirm.js";
 import type { Cart, MenuItem, Quote, Restaurant, TipInput } from "./core/types.js";
 import { buildRegistry, type ProviderRegistry } from "./providers/registry.js";
@@ -15,6 +16,8 @@ export interface Config {
   enableMock: boolean;
   /** Feature flag for place_order. Off unless MUNCH_ENABLE_PLACE_ORDER=1. */
   enablePlaceOrder: boolean;
+  /** Unfinished providers switched on with MUNCH_EXPERIMENTAL=ubereats,... */
+  experimental: string[];
 }
 
 export function defaultDataDir(): string {
@@ -30,6 +33,7 @@ export function configFromEnv(env: NodeJS.ProcessEnv = process.env): Config {
     // Phase 1 ships only demo providers, so they are on by default. Set MUNCH_MOCK=0 to hide them.
     enableMock: env.MUNCH_MOCK !== "0",
     enablePlaceOrder: env.MUNCH_ENABLE_PLACE_ORDER === "1",
+    experimental: (env.MUNCH_EXPERIMENTAL ?? "").split(",").map((s) => s.trim()).filter(Boolean),
   };
 }
 
@@ -44,6 +48,7 @@ export interface AppContext {
   config: Config;
   log: Logger;
   registry: ProviderRegistry;
+  browsers: BrowserSessions;
   store: EncryptedStore;
   prefs: PrefsStore;
   sessions: SessionStore;
@@ -62,10 +67,12 @@ export function createContext(overrides: Partial<Config> & { keys?: KeyProvider;
   const config = { ...configFromEnv(), ...overrides };
   const store = new EncryptedStore(config.dataDir, overrides.keys ?? new KeychainKeyProvider());
   const sessions = new SessionStore(store);
+  const browsers = new BrowserSessions(join(config.dataDir, "profiles"));
   return {
     config,
     log: overrides.log ?? createLogger(),
-    registry: buildRegistry({ sessions, enableMock: config.enableMock }),
+    registry: buildRegistry({ sessions, browsers, enableMock: config.enableMock, experimental: config.experimental }),
+    browsers,
     store,
     prefs: new PrefsStore(store),
     sessions,

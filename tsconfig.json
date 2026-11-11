@@ -10,5 +10,10 @@
     "resolveJsonModule": true,
     "noEmit": true
   },
-  "include": ["src", "test", "harness"]
+  "include": [
+    "src",
+    "test",
+    "harness",
+    "scripts"
+  ]
 }

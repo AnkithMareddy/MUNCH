@@ -81,6 +81,20 @@ describe("providers and sessions", () => {
   });
 });
 
+describe("unfinished real providers", () => {
+  it("Uber Eats appears only when switched on, without opening a browser, and never breaks search", async () => {
+    const r = await connected({ config: { experimental: ["ubereats"] } });
+    const list = (await r.call("list_providers")).data;
+    const uber = list.available.find((p: any) => p.provider === "ubereats");
+    expect(uber).toMatchObject({ status: "disconnected", session_valid: false });
+    expect(uber.notice).toMatch(/terms generally prohibit automated access/);
+    expect(r.ctx.browsers.isOpen("ubereats")).toBe(false);
+    const res = (await r.call("search", { query: "thai" })).data;
+    expect(res.searched).toEqual(["mockeats", "mockdash"]);
+    expect(res.skipped).toEqual([{ provider: "ubereats", reason: "not connected" }]);
+  });
+});
+
 describe("search", () => {
   it("normalizes across apps and matches the same restaurant", async () => {
     const r = await connected();

@@ -9,6 +9,7 @@ await server.connect(new StdioServerTransport());
 ctx.log.info("started", { mock: ctx.config.enableMock, place_order: ctx.config.enablePlaceOrder, persistent: await ctx.store.persistent() });
 
 const shutdown = async () => {
+  await ctx.browsers.closeAll();
   await ctx.confirm.close();
   await server.close();
   process.exit(0);
