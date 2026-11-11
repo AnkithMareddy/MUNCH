@@ -8,7 +8,7 @@
  * Type your messages; Ctrl-D to quit. Set MODEL to override the model.
  */
 import { dirname, join } from "node:path";
-import { createInterface } from "node:readline/promises";
+import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
 import type Anthropic from "@anthropic-ai/sdk";
 import type { AgentInputItem } from "@openai/agents";
@@ -16,13 +16,21 @@ import type { AgentInputItem } from "@openai/agents";
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const SERVER = { command: "npx", args: ["tsx", join(root, "src/index.ts")] };
 const llm = process.argv[process.argv.indexOf("--llm") + 1];
-const rl = createInterface({ input: process.stdin, output: process.stdout });
-const ask = async (q: string): Promise<string | undefined> => {
-  try {
-    return await rl.question(q);
-  } catch {
-    return undefined;
-  }
+const rl = createInterface({ input: process.stdin });
+// Lines are queued so piped input works as well as typing.
+const queue: string[] = [];
+const waiters: ((line: string | undefined) => void)[] = [];
+let closed = false;
+rl.on("line", (line) => (waiters.length ? waiters.shift()!(line) : queue.push(line)));
+rl.on("close", () => {
+  closed = true;
+  for (const w of waiters.splice(0)) w(undefined);
+});
+const ask = (q: string): Promise<string | undefined> => {
+  process.stdout.write(q);
+  if (queue.length) return Promise.resolve(queue.shift());
+  if (closed) return Promise.resolve(undefined);
+  return new Promise((resolve) => waiters.push(resolve));
 };
 
 async function claude(): Promise<void> {
@@ -110,7 +118,14 @@ async function openai(): Promise<void> {
   await server.close();
 }
 
-if (llm === "claude") await claude();
-else if (llm === "openai") await openai();
-else console.error("Usage: tsx harness/chat.ts --llm claude|openai");
+try {
+  if (llm === "claude") await claude();
+  else if (llm === "openai") await openai();
+  else console.error("Usage: tsx harness/chat.ts --llm claude|openai");
+} catch (e) {
+  const status = (e as { status?: number }).status;
+  console.error(status === 401 ? "\nThe API rejected the key. Set ANTHROPIC_API_KEY or OPENAI_API_KEY and try again." : `\nStopped: ${e instanceof Error ? e.message : e}`);
+  process.exitCode = 1;
+}
 rl.close();
+process.exit();
