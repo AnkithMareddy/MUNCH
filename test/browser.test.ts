@@ -69,6 +69,30 @@ describe("scrubbing shapes seen on the real site", () => {
   });
 });
 
+describe("scrubbing does not damage unrelated data", () => {
+  const doc = {
+    request: { cacheKey: "JTdCJTIyYWRkcmVzcyUyMiUzQSUyMjIxMTUlMjBCYXN0aWElMjIlMkMlMjJyZWZlcmVuY2UlMjI", link: "/search?carid=eyJhbmFseXRpY3NMYWJlbCI6InJlc3RhdXJhbnRfYWRfY2Fyb3VzZWwiLCJmZWVk" },
+    data: {
+      creditBalances: [{ amountString: "$0.00", type: "REGULAR" }],
+      user: { firstName: "Jane" },
+      feed: [{ type: "REGULAR_CAROUSEL", store: { title: "Subway" } }],
+      fees: [{ title: { text: "Delivery Fee" }, value: { text: "$0.00", accessibilityText: "before promotion: $0.49, now: $0.00" } }],
+      banner: "Hi Jane, welcome back",
+    },
+  };
+  const [clean] = scrubAll([doc]) as [typeof doc];
+
+  it("removes encoded blobs that can carry an address", () => {
+    expect(JSON.stringify(clean)).not.toMatch(/JTdC|eyJhbmF/);
+  });
+
+  it("keeps amounts and ordinary words that merely also appear in personal sections", () => {
+    expect(clean.data.fees[0]!.value).toEqual({ text: "$0.00", accessibilityText: "before promotion: $0.49, now: $0.00" });
+    expect(clean.data.feed[0]).toEqual({ type: "REGULAR_CAROUSEL", store: { title: "Subway" } });
+    expect(clean.data.banner).toBe("Hi [redacted], welcome back");
+  });
+});
+
 describe("report helpers", () => {
   it("urlPattern hides ids, store names and query values", () => {
     expect(urlPattern("https://www.ubereats.com/store/thai-orchid-smith-st/AbCdEfGhIjKlMnOpQrStUv?diningMode=DELIVERY&pl=xyz")).toBe("https://www.ubereats.com/store/:slug/:id?diningMode=…&pl=…");

@@ -1,7 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import type { AppContext } from "../context.js";
-import { mapOrderToMenu } from "../core/cartMapper.js";
+import { bestMenuMatch, mapOrderToMenu } from "../core/cartMapper.js";
 import { detectGhostKitchens } from "../core/compare/ghostKitchen.js";
 import { assignMatchGroups } from "../core/compare/matching.js";
 import { PROVIDER_NAMES, rankQuotes } from "../core/compare/ranking.js";
@@ -116,6 +116,7 @@ export function registerShoppingTools(server: McpServer, ctx: AppContext): void 
       if (excludeGhost === undefined) notes.push("The user has never said whether to hide ghost kitchens. Ask once, then save it with save_preferences. Flagged places are shown and labeled for now.");
       if (hidden.ghost_kitchens) notes.push(`${hidden.ghost_kitchens} likely ghost kitchen listing(s) hidden because the user wants real restaurants only.`);
       if (results.some((r) => r.ghost_kitchen?.flagged)) notes.push("Some results are flagged as likely ghost kitchens. Say so, with the reasons, whenever you mention them.");
+      for (const a of ctx.registry.all()) if (a.searchNote && searched.includes(a.id)) notes.push(`${a.displayName}: ${a.searchNote}`);
       if (criteria.dietary?.length) notes.push(`Dietary needs (${criteria.dietary.join(", ")}) are not filtered at restaurant level. Check dietary_tags on menu items with get_menu.`);
 
       return ok({
@@ -147,19 +148,36 @@ export function registerShoppingTools(server: McpServer, ctx: AppContext): void 
       title: "Build a cart on one app",
       description:
         "Maps the order the user wants onto one app's menu and puts it in their cart there. Dish and option names differ between apps, so matching is fuzzy: read `warnings` and `unmapped` and tell the user about anything approximate, defaulted or missing. Call once per app with the same items to compare apps.",
-      inputSchema: { provider: ProviderId, restaurant_id: z.string(), items: z.array(DesiredItem).min(1), mode: z.enum(["delivery", "pickup"]).optional() },
+      inputSchema: {
+        provider: ProviderId,
+        restaurant_id: z.string(),
+        items: z.array(DesiredItem).min(1),
+        mode: z.enum(["delivery", "pickup"]).optional(),
+        existing_cart: z.enum(["ask", "keep"]).optional().describe("What to do if the user already has items in a cart at this restaurant. Default 'ask': stop and report it. 'keep': add to it. Only pass 'keep' after the user said so."),
+      },
     },
-    handler(ctx, "build_cart", async (args: { provider: ProviderId; restaurant_id: string; items: DesiredItem[]; mode?: "delivery" | "pickup" }) => {
+    handler(ctx, "build_cart", async (args: { provider: ProviderId; restaurant_id: string; items: DesiredItem[]; mode?: "delivery" | "pickup"; existing_cart?: "ask" | "keep" }) => {
       if (providerOf(args.restaurant_id) !== args.provider) throw new ToolError("provider_mismatch", `${args.restaurant_id} does not belong to ${args.provider}.`, "Use the id from that app's search result.");
       const a = await requireConnected(ctx, args.provider);
       const prefs = await ctx.prefs.get();
       const restaurant = ctx.seen.get(args.restaurant_id) ?? (await ctx.throttle.run(a.id, () => a.getRestaurant(args.restaurant_id)));
       if (!restaurant) throw new ToolError("restaurant_not_found", `No restaurant ${args.restaurant_id} on ${a.displayName}.`, "Search again and use an id from the results.");
-      const menu = await cachedMenu(ctx, a, args.restaurant_id);
+      let menu = await cachedMenu(ctx, a, args.restaurant_id);
+      // Some apps only reveal a dish's options when you open it. Load those for the dishes being ordered, nothing else.
+      if (a.getMenuItem) {
+        for (const want of args.items) {
+          const hit = want.item_id ? menu.find((m) => m.id === want.item_id) : bestMenuMatch(want.name, menu)?.item;
+          if (!hit?.has_options || hit.modifiers.length > 0) continue;
+          const full = await ctx.throttle.run(a.id, () => a.getMenuItem!(args.restaurant_id, hit.id));
+          menu = menu.map((m) => (m.id === full.id ? { ...m, ...full, category: m.category } : m));
+          ctx.menuCache.set(args.restaurant_id, menu);
+        }
+      }
       const cart = mapOrderToMenu({ provider: a.id, restaurantId: restaurant.id, restaurantName: restaurant.name, mode: args.mode ?? prefs.default_mode ?? "delivery", desired: args.items, menu });
       if (cart.lines.length === 0)
         throw new ToolError("nothing_matched", `None of the requested items were found on ${restaurant.name}'s menu on ${a.displayName}.`, "Call get_menu and use exact item names or item_id.");
-      await ctx.throttle.run(a.id, () => a.syncCart(cart));
+      const synced = await ctx.throttle.run(a.id, () => a.syncCart(cart, { existingCart: args.existing_cart ?? "ask" }));
+      if (synced) cart.warnings.push(...synced);
       ctx.carts.set(cart.id, { cart, restaurant });
       return ok({ cart: { ...cart, subtotal: fmt(cart.subtotal_cents) }, ghost_kitchen: restaurant.ghost_kitchen?.flagged ? restaurant.ghost_kitchen : undefined, next_step: "Call quote_cart with this cart_id and the user's tip." });
     }),

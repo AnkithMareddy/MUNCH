@@ -224,9 +224,24 @@ Still open (defaults in use until you say otherwise):
 The live site can't be reached from the development sandbox, so Phase 2 is split:
 
 - **2a (done):** visible-browser session manager (the user's installed Chrome, one profile per app, no stealth or CAPTCHA handling), sign-in flow that only watches for the signed-in state, session expiry detection, sign-out that deletes the profile, a recording tool (`npm run record -- ubereats`) and a PII scrubber. All tested headless against a fake local site.
-- **2b (next):** search, menu, cart, quote and checkout handoff, written against a real recording.
+- **2b (built, experimental):** search, menu, dish options, cart, quote and checkout handoff, written against a real recording of the site (Nov 2026).
 
-Assumptions in `src/providers/ubereats/site.ts` are marked UNVERIFIED until a recording confirms them: the login URL, the internal API path pattern, and the cookie that signals a signed-in session.
+How the adapter works:
+- **Reading:** it moves the real page (search page, store page, dish dialog, checkout) and listens to the JSON the page itself loads. It sends no requests of its own.
+- **Writing:** it clicks the site's own dish dialog and add-to-cart button, then compares the request the site sent with what it meant to add. A mismatch stops everything.
+- **Never:** clicks "Place order", or changes address, payment or tip. There is no `placeOrder` for Uber Eats.
+- **Existing carts:** Uber Eats keeps one cart per restaurant. If the user already has items in that cart, `build_cart` refuses until the user agrees to add on top.
+- **Totals:** Uber's displayed total includes its preselected tip. The adapter subtracts that tip to get the before-tip total, then core checks the fee lines add up to it; if not, the quote is an estimate.
+
+Confirmed by the recording: the `sid` sign-in cookie, the `/_p/api/` data calls and their field names, store URL ids (base64url of the store uuid), the store/dish/checkout page hooks, and the checkbox naming for dish options.
+
+Still UNVERIFIED against the live site:
+- The search results page (`/search?q=`): the recording only reached the suggestions dropdown.
+- Which radio button belongs to which single-choice option. The adapter assumes menu order and relies on the add-to-cart check to catch a wrong pick.
+- Pickup mode, dishes with nested choices, sold-out handling, and very long menus that load in pages.
+- Behavior under bot checks. The adapter stops and asks the user to look at the window.
+
+Tests run the whole flow against a local stand-in site built from the recorded shapes (`test/fixtures/ubereatsFake.ts`). That proves the logic matches the recording, not that the live site still does.
 
 ## Sources
 - [About DoorDash MCP](https://developer.doordash.com/en-US/docs/mcp/overview/about_mcp/) · [DoorDash MCP & CLI](https://developer.doordash.com/en-US/mcp/) · [DoorDash ordering connector announcement](https://about.doordash.com/en-us/news/doordash-ordering-connector) · [Kingy AI: DoorDash MCP beta](https://kingy.ai/news/doordash-mcp-corporate-ordering-beta/)

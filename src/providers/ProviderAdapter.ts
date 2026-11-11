@@ -51,6 +51,8 @@ export interface ProviderAdapter {
   readonly overlapsWith?: ProviderId[];
   /** Shown to the user before they connect. Terms-of-service and account-risk notes. */
   readonly connectNotice?: string;
+  /** Something the user should know about how this app's search works. */
+  readonly searchNote?: string;
 
   sessionStatus(): Promise<ProviderSession>;
   /** May return status "pending" while the user is still signing in. */
@@ -60,12 +62,22 @@ export interface ProviderAdapter {
   search(criteria: SearchCriteria): Promise<Restaurant[]>;
   getRestaurant(restaurantId: string): Promise<Restaurant | undefined>;
   getMenu(restaurantId: string): Promise<MenuItem[]>;
-  /** Puts the mapped cart into the user's real cart on the provider. */
-  syncCart(cart: Cart): Promise<void>;
+  /**
+   * Optional. For apps whose menu listing leaves out a dish's options: loads one
+   * dish in full. Called only for the dishes the user is actually ordering.
+   */
+  getMenuItem?(restaurantId: string, itemId: string): Promise<MenuItem>;
+  /**
+   * Puts the mapped cart into the user's real cart on the provider.
+   * If the user already has items in a cart at this restaurant, the adapter must
+   * refuse unless existingCart is "keep" (the user agreed to add on top).
+   * Returns warnings to pass on to the user.
+   */
+  syncCart(cart: Cart, opts: { existingCart: "ask" | "keep" }): Promise<string[] | void>;
   /** Reads the checkout page. Must never submit. */
   quote(cart: Cart, ctx: QuoteContext): Promise<ProviderQuote>;
   /** Opens (or returns the URL of) the provider's own checkout page with the cart filled in. */
-  openCheckout(cart: Cart): Promise<{ url: string; opened: boolean }>;
+  openCheckout(cart: Cart): Promise<{ url: string; opened: boolean; note?: string }>;
   /** Optional. Only called behind the feature flag with a verified one-time token. */
   placeOrder?(cart: Cart): Promise<OrderReceipt>;
 }

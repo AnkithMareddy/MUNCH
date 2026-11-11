@@ -4,7 +4,7 @@
 
 MUNCH is a free, open-source add-on for AI assistants (Claude, OpenAI agents, and anything else that supports [MCP](https://modelcontextprotocol.io)). It runs on your own computer.
 
-> **Status: early preview.** The full experience works today against two built-in **demo apps with fake data** (MockEats and MockDash), so you can try the conversation end to end. Real apps are not usable yet. **Uber Eats is in progress:** browser sign-in is built, and search, menus, carts and pricing come next. DoorDash, Grubhub and Postmates follow. See the [roadmap](#roadmap).
+> **Status: early preview.** The full experience works today against two built-in **demo apps with fake data** (MockEats and MockDash). **Uber Eats is built but experimental:** sign-in, search, menus, cart, itemized pricing and checkout handoff are written from a recording of the real site and pass tests against a local copy of it, but have had little use against the live site. It is off by default. DoorDash, Grubhub and Postmates come next. See the [roadmap](#roadmap).
 
 ## Why this is useful
 
@@ -128,7 +128,7 @@ These rules are enforced by the server itself, not left to the AI model:
 | 0 | Research and plan ([`docs/PHASE0_PLAN.md`](docs/PHASE0_PLAN.md)) | Done |
 | 1 | Server, demo apps, comparison, safe checkout flow | Done |
 | 2a | Uber Eats: browser layer, sign-in, session checks, recording tool | Done |
-| 2b | Uber Eats: search, menus, cart, itemized quote, checkout handoff | In progress |
+| 2b | Uber Eats: search, menus, cart, itemized quote, checkout handoff | Built, experimental: needs live-site testing |
 | 3 | DoorDash, Grubhub, Postmates (de-duplicated against Uber Eats) | Planned |
 | 4 | Tuning restaurant matching and ghost-kitchen detection on real data | Planned |
 | 5 | Hardening: session expiry, breakage detection, recorded test fixtures | Planned |
@@ -172,9 +172,30 @@ Prompt: `concierge_intake`.
 |---|---|---|
 | `MUNCH_ENABLE_PLACE_ORDER` | off | `1` enables `place_order` |
 | `MUNCH_MOCK` | on | `0` hides the demo providers |
-| `MUNCH_EXPERIMENTAL` | off | `ubereats` switches on the unfinished Uber Eats provider (sign-in only for now) |
+| `MUNCH_EXPERIMENTAL` | off | `ubereats` switches on the experimental Uber Eats provider |
 | `MUNCH_DATA_DIR` | OS app-data folder | Where encrypted files live |
 | `MUNCH_LOG` | on | `silent` turns off logs |
+
+### Trying Uber Eats (experimental)
+
+Read the [terms-of-service note](#terms-of-service-read-before-using-with-real-apps) first. You need Google Chrome.
+
+The quickest check needs no AI model and no API key. It walks through sign-in, search, menu, cart and pricing in your terminal and stops at the checkout page. It never places an order:
+
+```bash
+npm run try -- ubereats
+```
+
+To use it from an assistant, start the server with `MUNCH_EXPERIMENTAL=ubereats`. In Claude Desktop that is an `"env": { "MUNCH_EXPERIMENTAL": "ubereats" }` entry next to `"command"` in the config shown above.
+
+How it behaves:
+
+- It uses the delivery address and payment method already selected in your Uber Eats account and never changes them.
+- It adds dishes by clicking Uber Eats' own buttons, then checks that what Uber Eats added matches what you asked for.
+- If you already have items in a cart at that restaurant, it stops and asks before adding to it.
+- Totals are read from Uber Eats' checkout page. Uber Eats preselects a tip there; the quote uses the tip you chose instead and tells you to set it at checkout.
+- There is no direct ordering for Uber Eats. You always tap "Place order" yourself.
+- If the site doesn't behave as expected, it says so and stops instead of guessing.
 
 ### Recording a real site (for adapter development)
 
@@ -204,9 +225,9 @@ Nothing in `src/core` or `src/tools` needs to change. Adapter rules: never touch
 ```
 src/core/        types, cart mapping, quote assembly, confirmation tokens
 src/core/compare restaurant matching, ghost-kitchen detection, ranking
-src/providers/   ProviderAdapter interface, registry, mock provider, ubereats (in progress)
+src/providers/   ProviderAdapter interface, registry, mock provider, ubereats (experimental)
 src/browser/     visible browser sessions, sign-in flow, recorder, PII scrubbing
-scripts/         record.ts: capture a real site for adapter development
+scripts/         record.ts: capture a real site for adapter development; try.ts: walk one app end to end
 src/storage/     keychain key, encrypted store, preferences, sessions
 src/tools/       MCP tools
 src/prompts/     the intake guide

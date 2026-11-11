@@ -15,6 +15,25 @@ export const UBEREATS = {
   cookieDomains: ["https://www.ubereats.com", "https://auth.uber.com"],
   /** CONFIRMED: `sid` is set by signing in. */
   loginCookies: ["sid"],
+  apiPrefix: "/_p/api/",
+  /** UNVERIFIED: the results page for a typed search. The recording only reached the suggestions dropdown. */
+  searchUrl: (q: string, pickup: boolean) => `https://www.ubereats.com/search?q=${encodeURIComponent(q)}${pickup ? "&diningMode=PICKUP" : ""}`,
+  /** CONFIRMED: the home feed. */
+  feedUrl: (pickup: boolean) => `https://www.ubereats.com/feed${pickup ? "?diningMode=PICKUP" : ""}`,
+  /** CONFIRMED hooks (data-testid / aria-label), seen on the store page, dish dialog and checkout. */
+  sel: {
+    storeLoaded: '[data-testid="store-loaded"]',
+    storeItem: (uuid: string) => `[data-testid="store-item-${uuid}"]`,
+    addToCart: '[data-testid="add-to-cart-button"]',
+    dialogClose: '[data-testid="baseui-modal-close"]',
+    /** CONFIRMED naming: checkbox name is "item-<optionUuid>-<groupUuid>+<n>". */
+    optionCheckbox: (optionUuid: string) => `input[type="checkbox"][name^="item-${optionUuid}-"]`,
+    /** CONFIRMED naming: radio name is "<groupUuid>+<n>". Which radio is which option is UNVERIFIED. */
+    groupRadios: (groupUuid: string) => `input[type="radio"][name^="${groupUuid}+"]`,
+    goToCheckout: '[aria-label="Go to checkout"]',
+    placeOrder: '[data-testid="place-order-btn"]',
+    checkoutTotal: '[data-testid="fare-breakdown-total-label"]',
+  },
 };
 
 export function ubereatsLogin(site = UBEREATS): SiteLogin {

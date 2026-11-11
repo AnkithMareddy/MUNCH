@@ -47,6 +47,7 @@ export function mapOrderToMenu(args: {
       let best: { group: string; groupId: string; name: string; delta: number; score: number } | undefined;
       for (const group of item.modifiers) {
         for (const opt of group.options) {
+          if (opt.sold_out) continue;
           const s = Math.max(similarity(wantedOpt, opt.name), similarity(wantedOpt, `${group.name} ${opt.name}`));
           if (!best || s > best.score) best = { group: group.name, groupId: group.id, name: opt.name, delta: opt.price_delta_cents, score: s };
         }
@@ -61,7 +62,7 @@ export function mapOrderToMenu(args: {
     // Required groups the user didn't speak to get the app's default, and we say so.
     for (const group of item.modifiers) {
       if (!group.required || chosenGroups.has(group.id)) continue;
-      const def = group.options.find((o) => o.is_default) ?? group.options[0];
+      const def = group.options.find((o) => o.is_default && !o.sold_out) ?? group.options.find((o) => !o.sold_out);
       if (!def) continue;
       selected.push({ modifier: group.name, option: def.name, price_delta_cents: def.price_delta_cents });
       warnings.push(`${item.name}: "${group.name}" is required. Defaulted to "${def.name}".`);

@@ -4,7 +4,7 @@
  * public and are kept. Anything about the signed-in person is not.
  */
 const PERSONAL_KEY =
-  /^(first|last|full|display|given|family|nick|creator|eater|customer|user|participant|business)?_?name$|email|phone|mobile|password|token|jwt|csrf|cookie|session|secret|signature|authorization|address|street|apt|suite|zip|postal|birth|card|payment|billing|wallet|credit|balance|voucher|avatar|picture|photo|^(user|eater|customer|client|consumer|rider|account|person|profile|device|tenancy)(_?(uu)?id)?$|(user|eater|customer|consumer|rider|account|device|participant|profile)_?(uu)?id$|instruction|^note(s)?$|referral|invite|^ip$|^reference$|display_?string|fingerprint/i;
+  /^(first|last|full|display|given|family|nick|creator|eater|customer|user|participant|business)?_?name$|email|phone|mobile|password|token|jwt|csrf|cookie|session|secret|signature|authorization|address|street|apt|suite|zip|postal|birth|card|payment|billing|wallet|credit|balance|voucher|avatar|picture|photo|^(user|eater|customer|client|consumer|rider|account|person|profile|device|tenancy)(_?(uu)?id)?$|(user|eater|customer|consumer|rider|account|device|participant|profile)_?(uu)?id$|instruction|^note(s)?$|referral|invite|^ip$|^reference$|display_?string|fingerprint|cache_?key|serialized_?request_?context/i;
 /** Under these, "name" and "address" belong to a restaurant, which is public. */
 const PUBLIC_CONTEXT = /store|restaurant|merchant|vendor|item|menu|catalog|section|category|product|brand|cuisine|option|modifier|customization|feed|carousel|promo|badge|fee|fare|charge/i;
 /** Under these, coordinates point at the user. */
@@ -17,6 +17,8 @@ const PATTERNS: [RegExp, string][] = [
   [/(\+?1[\s.-]?)?\(?\d{3}\)?[\s.-]\d{3}[\s.-]\d{4}\b/g, "[phone]"],
   [/\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{5,}\b/g, "[jwt]"],
   [/\b(?:\d[ -]?){13,19}\b/g, "[number]"],
+  // Long encoded blobs (base64 of JSON, URL-encoded JSON). The site packs addresses into these.
+  [/(?:JT[A-Za-z0-9]{2}|eyJ)[A-Za-z0-9+/_=%-]{30,}…?/g, "[encoded]"],
 ];
 
 export interface ScrubResult {
@@ -25,10 +27,21 @@ export interface ScrubResult {
   found: Set<string>;
 }
 
-function collect(value: unknown, found: Set<string>): void {
-  if (typeof value === "string" && value.trim().length >= 4) found.add(value.trim());
-  else if (Array.isArray(value)) value.forEach((v) => collect(v, found));
-  else if (value && typeof value === "object") Object.values(value).forEach((v) => collect(v, found));
+const NAME_KEY = /name$/i;
+
+/**
+ * Remembers personal values so repeats elsewhere can be removed too. Only values
+ * specific enough to be personal are kept: a phrase, or something with a digit
+ * or "@". A lone common word ("Regular", "$0.00") would wipe out unrelated text,
+ * so single words are kept only when they came from a name field.
+ */
+function collect(value: unknown, found: Set<string>, fromName = false): void {
+  if (typeof value === "string") {
+    const v = value.trim();
+    const specific = /\s/.test(v) ? v.length >= 6 : /@/.test(v) || (/\d/.test(v) && /[A-Za-z]/.test(v) && v.length >= 6);
+    if (specific || (fromName && v.length >= 3 && /^[\p{L}'-]+$/u.test(v))) found.add(v);
+  } else if (Array.isArray(value)) value.forEach((v) => collect(v, found, fromName));
+  else if (value && typeof value === "object") for (const [k, v] of Object.entries(value)) collect(v, found, NAME_KEY.test(k));
 }
 
 function walk(value: unknown, path: string[], found: Set<string>): unknown {
@@ -43,7 +56,7 @@ function walk(value: unknown, path: string[], found: Set<string>): unknown {
       const personalCoord = COORD_KEY.test(k) && personalHere;
       const personalText = personalHere && NAMEISH.test(k);
       if (personalKey || personalCoord || personalText) {
-        collect(v, found);
+        collect(v, found, NAME_KEY.test(k));
         out[k] = "[redacted]";
       } else {
         out[k] = walk(v, [...path, k], found);

@@ -25,7 +25,8 @@
     "harness:smoke": "tsx harness/smoke.ts",
     "harness:claude": "tsx harness/chat.ts --llm claude",
     "harness:openai": "tsx harness/chat.ts --llm openai",
-    "record": "tsx scripts/record.ts"
+    "record": "tsx scripts/record.ts",
+    "try": "tsx scripts/try.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.32.2",

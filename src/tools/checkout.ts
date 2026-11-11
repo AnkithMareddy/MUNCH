@@ -27,7 +27,7 @@ export function registerCheckoutTools(server: McpServer, ctx: AppContext): void 
         checkout_url: res.url,
         opened_in_browser: res.opened,
         last_quoted_total: quoteView(rec.lastQuote).display.total,
-        tell_user: `${res.opened ? "The checkout page is open" : "Open this link"} on ${a.displayName}. Review the cart and total there, then tap "Place order" yourself. Nothing has been ordered. The app's own total is the final one.`,
+        tell_user: `${res.opened ? "The checkout page is open" : "Open this link"} on ${a.displayName}. Review the cart and total there, then tap "Place order" yourself. Nothing has been ordered. The app's own total is the final one.${res.note ? " " + res.note : ""}`,
       });
     }),
   );

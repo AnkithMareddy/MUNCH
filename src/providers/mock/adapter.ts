@@ -114,6 +114,7 @@ export class MockAdapter implements ProviderAdapter {
   }
 
   async syncCart(cart: Cart): Promise<void> {
+    // A real adapter checks for an existing cart here.
     this.syncedCarts.add(cart.id);
   }
 

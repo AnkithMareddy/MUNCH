@@ -46,6 +46,7 @@ export const ModifierOption = z.object({
   name: z.string(),
   price_delta_cents: Cents.default(0),
   is_default: z.boolean().optional(),
+  sold_out: z.boolean().optional(),
 });
 export type ModifierOption = z.infer<typeof ModifierOption>;
 
@@ -65,6 +66,10 @@ export const MenuItem = z.object({
   description: z.string().optional(),
   category: z.string().optional(),
   price_cents: Cents,
+  /** Set when the listed price is not the whole story, e.g. "Priced by add-ons". */
+  price_note: z.string().optional(),
+  /** True when the dish has choices that are only loaded when it is added to a cart. */
+  has_options: z.boolean().optional(),
   dietary_tags: z.array(z.string()).default([]),
   modifiers: z.array(Modifier).default([]),
   available: z.boolean().default(true),
