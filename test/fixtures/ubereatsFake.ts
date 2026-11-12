@@ -174,8 +174,16 @@ async function route() {
   }
 }
 function showCartBar() {
-  document.getElementById("cartbar").innerHTML = '<button aria-label="View cart">View cart</button><button aria-label="Go to checkout">Go to checkout</button>';
-  document.querySelector('[aria-label="Go to checkout"]').addEventListener("click", () => { sessionStorage.setItem("draft", draft); history.pushState({}, "", "/checkout?mod=x"); route(); });
+  // Like the real site: "Go to checkout" exists only while the cart panel is open.
+  const mode = window.__CART_UI__ || "panel";
+  if (draft) sessionStorage.setItem("draft", draft);
+  const bar = document.getElementById("cartbar");
+  if (mode === "none") { bar.innerHTML = ""; return; }
+  bar.innerHTML = '<button aria-label="View cart">View cart</button><span id="panel"></span>';
+  bar.querySelector('[aria-label="View cart"]').addEventListener("click", () => {
+    document.getElementById("panel").innerHTML = '<button aria-label="Go to checkout">Go to checkout</button>';
+    document.querySelector('[aria-label="Go to checkout"]').addEventListener("click", () => { history.pushState({}, "", "/checkout?mod=x"); route(); });
+  });
 }
 async function openDish(storeUuid, uuid) {
   const item = await api("getMenuItemV1", { itemRequestType: "ITEM", storeUuid, menuItemUuid: uuid, diningMode: "DELIVERY" });
@@ -211,7 +219,7 @@ route();
 export interface FakeUberEats {
   server: Server;
   origin: string;
-  state: { drafts: Map<string, { uuid: string; store: string; items: any[] }>; calls: string[]; ssr?: "encoded" | "plain" | "hidden"; breakRadios?: boolean; wrongSum?: boolean; emptySearch?: boolean; swapItem?: boolean };
+  state: { drafts: Map<string, { uuid: string; store: string; items: any[] }>; calls: string[]; ssr?: "encoded" | "plain" | "hidden"; cartUi?: "panel" | "none"; breakRadios?: boolean; wrongSum?: boolean; emptySearch?: boolean; swapItem?: boolean };
   seedCart(items: { title: string; quantity: number }[]): void;
 }
 
@@ -232,6 +240,7 @@ export function startFakeUberEats(): Promise<FakeUberEats> {
         const tag = state.ssr === "hidden" ? "" : `<script type="application/json" id="__REDUX_STATE__">${text}</script>`;
         page = PAGE.replace("<body>", `<body>${tag}<script>window.__SHIPPED__ = ${JSON.stringify(STORE_DATA)};</script>`);
       }
+      if (state.cartUi) page = page.replace("<body>", `<body><script>window.__CART_UI__ = ${JSON.stringify(state.cartUi)};</script>`);
       return void res.writeHead(200, { "content-type": "text/html" }).end(page);
     }
 

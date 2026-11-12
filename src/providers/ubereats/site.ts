@@ -30,7 +30,10 @@ export const UBEREATS = {
     optionCheckbox: (optionUuid: string) => `input[type="checkbox"][name^="item-${optionUuid}-"]`,
     /** CONFIRMED naming: radio name is "<groupUuid>+<n>". Which radio is which option is UNVERIFIED. */
     groupRadios: (groupUuid: string) => `input[type="radio"][name^="${groupUuid}+"]`,
+    /** CONFIRMED to exist, but only while the cart panel (or the just-added popup) is showing. */
     goToCheckout: '[aria-label="Go to checkout"]',
+    /** CONFIRMED labels/hooks that open the cart panel. Which one is on screen varies. */
+    openCart: ['[aria-label="View cart"]', '[data-testid="view-carts-badge"]'],
     placeOrder: '[data-testid="place-order-btn"]',
     checkoutTotal: '[data-testid="fare-breakdown-total-label"]',
   },

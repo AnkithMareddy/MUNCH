@@ -223,6 +223,21 @@ describe("Uber Eats adapter, end to end against a local stand-in site", () => {
     expect(new URL((await browsers.page("ubereats")).url()).pathname).toBe("/checkout");
   }, 60_000);
 
+  it("reaches checkout when the site shows no cart button at all, and says how it got there", async (t) => {
+    if (!available) return t.skip();
+    fake.state.cartUi = "none";
+    const page = await browsers.page("ubereats");
+    await page.goto(fake.origin + "/feed"); // leave checkout, as a user who wandered off would
+    const q = await r.call("quote_cart", { cart_id: cartId, tip: { type: "flat", cents: 500 } });
+    expect(q.isError).toBe(false);
+    expect(q.data.quote.verified).toBe(true);
+    quoteId = q.data.quote.id;
+    const trace = (r.ctx.registry.get("ubereats") as any).trace.join(" | ");
+    expect(trace).toMatch(/opened the cart with \[aria-label="View cart"\]/); // the earlier quote
+    expect(trace).toMatch(/no button found, opening the checkout page directly/);
+    fake.state.cartUi = undefined;
+  }, 60_000);
+
   it("hands off at checkout and never presses Place order", async (t) => {
     if (!available) return t.skip();
     const res = (await r.call("open_checkout", { cart_id: cartId })).data;
@@ -264,6 +279,7 @@ describe("Uber Eats adapter, end to end against a local stand-in site", () => {
   it("fails clearly, without guessing, when the site doesn't behave as recorded", async (t) => {
     if (!available) return t.skip();
     fake.state.swapItem = true; // the site opens a different restaurant than the one requested
+    (r.ctx.registry.get("ubereats") as any).open = undefined; // as if the store page had not been opened yet
     r.ctx.menuCache = new (await import("../src/util/throttle.js")).TtlCache(1);
     await new Promise((x) => setTimeout(x, 5));
     const res = await r.call("build_cart", { provider: "ubereats", restaurant_id: RID, items: [{ name: "thai ice coffee", quantity: 1 }] });

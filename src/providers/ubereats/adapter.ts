@@ -22,8 +22,22 @@ const PAGE_DIAGNOSTICS_SCRIPT = `(() => {
   return "path " + location.pathname.split("/").slice(0, 2).join("/") + "; store-loaded hook " + (document.querySelector('[data-testid="store-loaded"]') ? "present" : "missing") + "; dish cards " + document.querySelectorAll('[data-testid^="store-item-"]').length + "; inline scripts " + (scripts.slice(0, 8).join(" ") || "none");
 })()`;
 
+/** Buttons and hooks related to the cart, by label only: for error messages. */
+const CART_DIAGNOSTICS_SCRIPT = `(() => {
+  const pick = (v) => v && /cart|checkout|basket|order/i.test(v) ? v : null;
+  const out = new Set();
+  for (const e of document.querySelectorAll("button, a, [role=button], [data-testid]")) {
+    const a = pick(e.getAttribute("aria-label")); const t = pick(e.getAttribute("data-testid"));
+    const visible = !!(e.offsetWidth || e.offsetHeight);
+    if (a) out.add("aria=" + a + (visible ? "" : "(hidden)"));
+    if (t) out.add("testid=" + t + (visible ? "" : "(hidden)"));
+  }
+  return [...out].slice(0, 25).join(", ") || "none";
+})()`;
+
 interface OpenStore {
   restaurantId: string;
+  openedAt: number;
   mode: "delivery" | "pickup";
   parsed: ParsedStore;
   /** Items already in the user's cart at this store when the page loaded. */
@@ -46,6 +60,13 @@ export class UberEatsAdapter implements ProviderAdapter {
   readonly connectNotice =
     "This controls your own signed-in Uber Eats session in a browser window on your computer. Uber's terms generally prohibit automated access, so your account could be flagged or suspended. You sign in yourself; your password is never seen or stored.";
   readonly searchNote = "Results and prices are for the delivery address currently selected in the user's Uber Eats account. To change it, the user edits it in the Uber Eats window themselves.";
+
+  /** How each step actually got done on the site, newest last. Shown by the trial script; holds no personal data. */
+  readonly trace: string[] = [];
+  private note(msg: string): void {
+    this.trace.push(msg);
+    if (this.trace.length > 40) this.trace.shift();
+  }
 
   private login: LoginFlow;
   private tap?: ApiTap;
@@ -144,7 +165,7 @@ export class UberEatsAdapter implements ProviderAdapter {
     const mine = (drafts?.data?.draftOrders ?? []).find((d: any) => d.restaurantUUID === uuidOf(restaurantId));
     const existingItems: string[] = (mine?.shoppingCart?.items ?? []).map((i: any) => `${i.quantity ?? 1} × ${i.title ?? "item"}`);
 
-    this.open = { restaurantId, mode, parsed, existingItems };
+    this.open = { restaurantId, mode, parsed, existingItems, openedAt: Date.now() };
     await page.waitForSelector(this.site.sel.storeLoaded, { timeout: 15000 }).catch(() => undefined);
     return { ...this.open, page, tap };
   }
@@ -163,10 +184,15 @@ export class UberEatsAdapter implements ProviderAdapter {
 
     // Shipped state is there as soon as the page is; a data call takes a moment longer.
     for (let i = 0; i < 14; i++) {
-      const data = fromCall() ?? (await embedded());
-      if (data) return data;
+      const called = fromCall();
+      const data = called ?? (await embedded());
+      if (data) {
+        this.note(`store data: ${called ? "page data call" : "shipped inside the page"} after ${Date.now() - since}ms`);
+        return data;
+      }
       await pause(700, 700);
     }
+    this.note(`store data not found on direct open (${(await page.evaluate(PAGE_DIAGNOSTICS_SCRIPT).catch(() => "unavailable")) as string}; calls: ${tap.namesSince(since).join(",") || "none"})`);
 
     // Open the home page, then have the site navigate to the store the way a click would.
     const url = new URL(this.storeUrl(restaurantId, mode));
@@ -175,7 +201,10 @@ export class UberEatsAdapter implements ProviderAdapter {
     const again = tap.mark();
     await page.evaluate(`(() => { history.pushState({}, "", ${JSON.stringify(url.pathname + url.search)}); window.dispatchEvent(new PopStateEvent("popstate", { state: {} })); })()`).catch(() => undefined);
     const hit = await tap.wait(/^getStoreV1$/, { since: again, what: "the restaurant page", timeoutMs: 12000, where: (h) => h.data?.uuid === uuid || h.request?.storeUuid === uuid }).catch(() => undefined);
-    if (hit) return hit.data;
+    if (hit) {
+      this.note("store data: in-page navigation from the home page");
+      return hit.data;
+    }
 
     const seen = (await page.evaluate(PAGE_DIAGNOSTICS_SCRIPT).catch(() => "unavailable")) as string;
     throw siteChanged(SITE, `the restaurant page opened but its menu data was not found (page: ${seen}; data calls seen: ${tap.namesSince(since).join(", ") || "none"})`);
@@ -278,8 +307,10 @@ export class UberEatsAdapter implements ProviderAdapter {
   }
 
   async syncCart(cart: Cart, opts: { existingCart: "ask" | "keep" }): Promise<string[]> {
-    // Always reload: the saved-cart check must reflect right now.
-    const { page, tap, existingItems } = await this.openStore(cart.restaurant_id, cart.mode, true);
+    // The saved-cart check must be recent. Reload the store unless it was opened moments ago.
+    // If that look found items, always look again: the user may have just emptied the cart.
+    const recent = this.open?.restaurantId === cart.restaurant_id && this.open.existingItems.length === 0 && Date.now() - this.open.openedAt < 90_000;
+    const { page, tap, existingItems } = await this.openStore(cart.restaurant_id, cart.mode, !recent);
     if (existingItems.length > 0 && opts.existingCart !== "keep") {
       throw new ToolError(
         "existing_cart",
@@ -308,23 +339,52 @@ export class UberEatsAdapter implements ProviderAdapter {
     const since = tap.mark();
     if (/\/checkout/.test(page.url())) {
       await page.reload({ waitUntil: "domcontentloaded" });
+      this.note("checkout: reloaded");
     } else {
       const s = await this.openStore(cart.restaurant_id, cart.mode);
-      const button = s.page.locator(this.site.sel.goToCheckout).first();
-      await button.waitFor({ state: "visible", timeout: 10000 }).catch(() => {
-        throw siteChanged(SITE, 'the "Go to checkout" button did not appear');
-      });
-      await button.click();
+      await this.clickThroughToCheckout(s.page);
     }
     this.open = undefined;
     await page.waitForURL(/\/checkout/, { timeout: 20000 }).catch(() => {
       throw siteChanged(SITE, "the checkout page did not open");
     });
-    await tap.wait(/^getCheckoutPresentationV1$/, { since, what: "the checkout breakdown", where: isMine });
+    await tap.wait(/^getCheckoutPresentationV1$/, { since, what: "the checkout breakdown", where: isMine }).catch((e) => {
+      const other = tap.last(/^getCheckoutPresentationV1$/, since, (h) => !!h.data?.checkoutPayloads?.total);
+      if (other) throw siteChanged(SITE, "the checkout page opened for a different cart than the one just built, so no price was read");
+      throw e;
+    });
     // The page refreshes the breakdown more than once while it settles. Use the last one.
     await page.waitForSelector(this.site.sel.checkoutTotal, { timeout: 15000 }).catch(() => undefined);
     await pause(1200);
     return { page, hit: tap.last(/^getCheckoutPresentationV1$/, since, isMine)! };
+  }
+
+  /**
+   * Gets from the store page to checkout. The "Go to checkout" button only exists
+   * while the cart panel is showing, so: use it if it's there, else open the cart
+   * panel first, else open the checkout page directly. Whichever way, the caller
+   * then checks that the checkout shown is for this cart and no other.
+   */
+  private async clickThroughToCheckout(page: Page): Promise<void> {
+    const go = page.locator(this.site.sel.goToCheckout).first();
+    const visible = () => go.isVisible().catch(() => false);
+    if (await visible()) {
+      this.note("checkout: button already showing");
+      return void (await go.click());
+    }
+    for (const sel of this.site.sel.openCart) {
+      const opener = page.locator(sel).first();
+      if (!(await opener.isVisible().catch(() => false))) continue;
+      await opener.click().catch(() => undefined);
+      await go.waitFor({ state: "visible", timeout: 5000 }).catch(() => undefined);
+      if (await visible()) {
+        this.note(`checkout: opened the cart with ${sel}`);
+        return void (await go.click());
+      }
+    }
+    this.note(`checkout: no button found, opening the checkout page directly (cart controls on the page: ${(await page.evaluate(CART_DIAGNOSTICS_SCRIPT).catch(() => "unavailable")) as string})`);
+    await page.keyboard.press("Escape").catch(() => undefined);
+    await this.go(page, new URL("/checkout", this.site.homeUrl).toString());
   }
 
   async quote(cart: Cart): Promise<ProviderQuote> {

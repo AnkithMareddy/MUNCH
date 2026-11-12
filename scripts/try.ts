@@ -93,6 +93,8 @@ try {
   if ((e as Error).message !== "stopped") console.log(`\nStopped: ${(e as Error).message}`);
   console.log("\nIt stopped before finishing. Copy everything above and send it to Claude.");
 }
+const trace = (ctx.registry.get(provider as never) as { trace?: string[] } | undefined)?.trace ?? [];
+if (trace.length) console.log(`\nHow each step got done (for Claude):\n${trace.map((t) => `  · ${t}`).join("\n")}`);
 await ask("Press Enter to close the browser.");
 rl.close();
 await ctx.browsers.closeAll();
