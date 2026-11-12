@@ -265,3 +265,54 @@ export function parseCheckout(data: any): ParsedCheckout {
   q.item_count = typeof p.cartItems?.itemsCount === "number" ? p.cartItems.itemsCount : undefined;
   return q;
 }
+
+/**
+ * Finds a store's data inside state the page was shipped with. When a store
+ * page is opened directly, the site renders it on the server and embeds the
+ * data in a script tag instead of loading it with a separate call. The exact
+ * location inside that state is not relied on: this looks for the object that
+ * has this store's uuid and a menu.
+ */
+export function findEmbeddedStore(scriptTexts: string[], storeUuid: string): any | undefined {
+  for (const raw of scriptTexts) {
+    if (!raw.includes(storeUuid) || !raw.includes("catalogSectionsMap")) continue;
+    for (const root of decodings(raw)) {
+      const hit = deepFind(root, (o) => o.uuid === storeUuid && o.catalogSectionsMap && typeof o.catalogSectionsMap === "object" && typeof o.title === "string");
+      if (hit) return hit;
+    }
+  }
+  return undefined;
+}
+
+/** Embedded state is JSON, but sites wrap it differently: plain, percent-encoded, \u0022-escaped, or a JSON string of JSON. */
+function decodings(raw: string): unknown[] {
+  const out: unknown[] = [];
+  const attempts = [raw, raw.replace(/\\u0022/g, '"').replace(/\\u005C/gi, "\\")];
+  try {
+    attempts.push(decodeURIComponent(raw));
+  } catch {
+    // Not percent-encoded.
+  }
+  for (const text of attempts) {
+    try {
+      let v: unknown = JSON.parse(text);
+      for (let i = 0; i < 2 && typeof v === "string"; i++) v = JSON.parse(v);
+      if (v && typeof v === "object") out.push(v);
+    } catch {
+      // Try the next decoding.
+    }
+  }
+  return out;
+}
+
+function deepFind(root: unknown, match: (o: any) => boolean): any | undefined {
+  const stack: { v: unknown; d: number }[] = [{ v: root, d: 0 }];
+  let budget = 400000;
+  while (stack.length && budget-- > 0) {
+    const { v, d } = stack.pop()!;
+    if (!v || typeof v !== "object") continue;
+    if (!Array.isArray(v) && match(v)) return v;
+    if (d < 14) for (const c of Object.values(v)) if (c && typeof c === "object") stack.push({ v: c, d: d + 1 });
+  }
+  return undefined;
+}

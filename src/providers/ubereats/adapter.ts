@@ -6,12 +6,21 @@ import { ToolError } from "../../core/errors.js";
 import type { Cart, CartLine, MenuItem, ProviderSession, Restaurant, SearchCriteria } from "../../core/types.js";
 import type { SessionStore } from "../../storage/sessions.js";
 import type { ProviderAdapter, ProviderQuote } from "../ProviderAdapter.js";
-import { addedOptionIds, parseCheckout, parseFeed, parseMenuItem, ParseError, parseStore, storeUrlId, type ParsedStore } from "./parse.js";
+import { addedOptionIds, findEmbeddedStore, parseCheckout, parseFeed, parseMenuItem, ParseError, parseStore, storeUrlId, type ParsedStore } from "./parse.js";
 import { UBEREATS, ubereatsLogin } from "./site.js";
 
 const SITE = "Uber Eats";
 const pause = (min: number, max = min * 1.8) => new Promise((r) => setTimeout(r, min + Math.random() * (max - min)));
 const uuidOf = (id: string) => id.split(":").at(-1)!;
+
+// In-page scripts are plain strings: a compiled function can carry build-tool helpers that don't exist in the page.
+/** The text of script tags that can hold state the page was shipped with. */
+const EMBEDDED_STATE_SCRIPT = `[...document.querySelectorAll('script[type="application/json"], script[id*="STATE"], script[id*="DATA"]')].map((s) => s.textContent || "").filter((t) => t.length > 200)`;
+/** What the page looks like, with no content from it: for error messages. */
+const PAGE_DIAGNOSTICS_SCRIPT = `(() => {
+  const scripts = [...document.querySelectorAll("script")].filter((s) => !s.src && (s.textContent || "").length > 2000).map((s) => (s.id || "no-id") + "/" + (s.type || "js") + "/" + Math.round(s.textContent.length / 1000) + "k" + (s.textContent.includes("catalogSectionsMap") ? "/has-menu" : ""));
+  return "path " + location.pathname.split("/").slice(0, 2).join("/") + "; store-loaded hook " + (document.querySelector('[data-testid="store-loaded"]') ? "present" : "missing") + "; dish cards " + document.querySelectorAll('[data-testid^="store-item-"]').length + "; inline scripts " + (scripts.slice(0, 8).join(" ") || "none");
+})()`;
 
 interface OpenStore {
   restaurantId: string;
@@ -125,8 +134,8 @@ export class UberEatsAdapter implements ProviderAdapter {
 
     const since = tap.mark();
     await this.go(page, this.storeUrl(restaurantId, mode));
-    const hit = await tap.wait(/^getStoreV1$/, { since, what: "the restaurant page" });
-    const parsed = this.parse("the restaurant page", () => parseStore(hit.data));
+    const data = await this.readStore(page, tap, restaurantId, mode, since);
+    const parsed = this.parse("the restaurant page", () => parseStore(data));
     if (parsed.restaurant.id !== restaurantId) throw siteChanged(SITE, "a different restaurant opened than the one asked for");
     this.stores.set(restaurantId, parsed);
 
@@ -138,6 +147,38 @@ export class UberEatsAdapter implements ProviderAdapter {
     this.open = { restaurantId, mode, parsed, existingItems };
     await page.waitForSelector(this.site.sel.storeLoaded, { timeout: 15000 }).catch(() => undefined);
     return { ...this.open, page, tap };
+  }
+
+  /**
+   * Gets a store's data however the page delivers it:
+   *  1. a data call the page makes (when the site navigates within itself),
+   *  2. state embedded in the page (when the page is opened directly),
+   *  3. as a last resort, asking the site's own router to navigate to the store.
+   * If none work, the error says what the page did contain, to make fixing it quick.
+   */
+  private async readStore(page: Page, tap: ApiTap, restaurantId: string, mode: "delivery" | "pickup", since: number): Promise<any> {
+    const uuid = uuidOf(restaurantId);
+    const fromCall = () => tap.last(/^getStoreV1$/, since, (h) => h.data?.uuid === uuid || h.request?.storeUuid === uuid)?.data;
+    const embedded = async () => findEmbeddedStore((await page.evaluate(EMBEDDED_STATE_SCRIPT).catch(() => [])) as string[], uuid);
+
+    // Shipped state is there as soon as the page is; a data call takes a moment longer.
+    for (let i = 0; i < 14; i++) {
+      const data = fromCall() ?? (await embedded());
+      if (data) return data;
+      await pause(700, 700);
+    }
+
+    // Open the home page, then have the site navigate to the store the way a click would.
+    const url = new URL(this.storeUrl(restaurantId, mode));
+    await this.go(page, this.site.feedUrl(mode === "pickup"));
+    await pause(2500, 2500);
+    const again = tap.mark();
+    await page.evaluate(`(() => { history.pushState({}, "", ${JSON.stringify(url.pathname + url.search)}); window.dispatchEvent(new PopStateEvent("popstate", { state: {} })); })()`).catch(() => undefined);
+    const hit = await tap.wait(/^getStoreV1$/, { since: again, what: "the restaurant page", timeoutMs: 12000, where: (h) => h.data?.uuid === uuid || h.request?.storeUuid === uuid }).catch(() => undefined);
+    if (hit) return hit.data;
+
+    const seen = (await page.evaluate(PAGE_DIAGNOSTICS_SCRIPT).catch(() => "unavailable")) as string;
+    throw siteChanged(SITE, `the restaurant page opened but its menu data was not found (page: ${seen}; data calls seen: ${tap.namesSince(since).join(", ") || "none"})`);
   }
 
   async getRestaurant(restaurantId: string): Promise<Restaurant | undefined> {
@@ -188,7 +229,7 @@ export class UberEatsAdapter implements ProviderAdapter {
 
     const box = page.locator(this.site.sel.optionCheckbox(option.id)).first();
     if ((await box.count()) > 0) {
-      if (!(await box.isChecked())) await box.evaluate((el) => (el as HTMLElement).click());
+      if (!(await box.isChecked())) await box.dispatchEvent("click");
       return option.id;
     }
     const radios = page.locator(this.site.sel.groupRadios(group.id));
@@ -200,7 +241,7 @@ export class UberEatsAdapter implements ProviderAdapter {
       if (n !== group.options.length) throw siteChanged(SITE, `the choices for "${group.name}" don't line up with the menu`);
       target = radios.nth(group.options.indexOf(option));
     }
-    await target.evaluate((el) => (el as HTMLElement).click());
+    await target.dispatchEvent("click");
     return option.id;
   }
 

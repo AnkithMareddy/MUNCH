@@ -58,6 +58,11 @@ export class ApiTap {
     }
   }
 
+  /** Names of the data calls the page has made since `since`. For error messages. */
+  namesSince(since: number): string[] {
+    return [...new Set(this.hits.filter((h) => h.at >= since).map((h) => h.name))];
+  }
+
   /** A timestamp to pass as `since`, taken just before the action that triggers the load. */
   mark(): number {
     return Date.now();

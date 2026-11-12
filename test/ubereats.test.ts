@@ -4,9 +4,9 @@ import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { BrowserSessions } from "../src/browser/sessions.js";
 import { UberEatsAdapter } from "../src/providers/ubereats/adapter.js";
-import { dollars, e5ToCents, etaUpper, parseCheckout, parseFeed, parseMenuItem, parseStore, ParseError, storeUrlId } from "../src/providers/ubereats/parse.js";
+import { dollars, e5ToCents, etaUpper, findEmbeddedStore, parseCheckout, parseFeed, parseMenuItem, parseStore, ParseError, storeUrlId } from "../src/providers/ubereats/parse.js";
 import { UBEREATS } from "../src/providers/ubereats/site.js";
-import { Throttle } from "../src/util/throttle.js";
+import { Throttle, TtlCache } from "../src/util/throttle.js";
 import { checkoutData, FEED_HOME, FEED_SEARCH, IDS, ITEMS, startFakeUberEats, STORE_DATA, STORE_PATH, type FakeUberEats } from "./fixtures/ubereatsFake.js";
 import { rig, type Rig } from "./helpers.js";
 
@@ -78,6 +78,16 @@ describe("Uber Eats parsing (shapes from a real recording)", () => {
     expect(q.subtotal_cents + q.delivery_fee_cents + 542 + q.tax_cents - 74).toBe(q.total_before_tip_cents);
   });
 
+  it("finds a store inside state shipped with the page, however it is wrapped", () => {
+    const state = { a: { b: [{ stores: { x: { data: STORE_DATA } } }] } };
+    const json = JSON.stringify(state);
+    for (const text of [json, encodeURIComponent(json), JSON.stringify(json), json.replace(/"/g, "\\u0022")]) {
+      expect(findEmbeddedStore(["unrelated", text], IDS.STORE)?.title).toBe("Thai Sample");
+    }
+    expect(findEmbeddedStore([json], IDS.OTHER_STORE)).toBeUndefined();
+    expect(findEmbeddedStore(["{broken json " + IDS.STORE + " catalogSectionsMap"], IDS.STORE)).toBeUndefined();
+  });
+
   it("refuses to guess when the breakdown is missing or unreadable", () => {
     expect(() => parseCheckout({ checkoutPayloads: {} })).toThrow(ParseError);
     const q = parseCheckout({ checkoutPayloads: { total: { total: { value: { amountE5: 1000000 } } }, subtotal: { subtotal: { value: { amountE5: 900000 } } }, fareBreakdown: { charges: [{ title: { text: "Mystery" }, value: { text: "see app" } }] } } });
@@ -141,6 +151,30 @@ describe("Uber Eats adapter, end to end against a local stand-in site", () => {
     expect(new URL((await browsers.page("ubereats")).url()).pathname).toBe(STORE_PATH);
   }, 30_000);
 
+  it("reads the menu when the site ships it inside the page instead of loading it separately", async (t) => {
+    if (!available) return t.skip();
+    for (const mode of ["encoded", "plain"] as const) {
+      fake.state.ssr = mode;
+      fake.state.calls.length = 0;
+      r.ctx.menuCache = new TtlCache(60000);
+      (r.ctx.registry.get("ubereats") as any).open = undefined;
+      const menu = await r.call("get_menu", { provider: "ubereats", restaurant_id: RID });
+      expect(menu.isError).toBe(false);
+      expect(menu.data.items.map((i: any) => i.name)).toEqual(["Panang Curry", "Thai Ice Coffee"]);
+      expect(fake.state.calls).not.toContain("getStoreV1");
+    }
+    // Shipped in a form we can't read: fall back to the site's own in-page navigation.
+    fake.state.ssr = "hidden";
+    fake.state.calls.length = 0;
+    r.ctx.menuCache = new TtlCache(60000);
+    (r.ctx.registry.get("ubereats") as any).open = undefined;
+    const menu = await r.call("get_menu", { provider: "ubereats", restaurant_id: RID });
+    expect(menu.data.items).toHaveLength(2);
+    expect(fake.state.calls).toContain("getStoreV1");
+    fake.state.ssr = undefined;
+    (r.ctx.registry.get("ubereats") as any).open = undefined;
+  }, 90_000);
+
   it("refuses to touch a cart the user already has, until they say so", async (t) => {
     if (!available) return t.skip();
     fake.seedCart([{ title: "Old Spring Rolls", quantity: 2 }]);
@@ -149,7 +183,7 @@ describe("Uber Eats adapter, end to end against a local stand-in site", () => {
     expect(res.data.message).toContain("2 × Old Spring Rolls");
     expect(fake.state.calls.filter((c) => /DraftOrderV2/.test(c))).toEqual([]);
     fake.state.drafts.clear();
-  }, 30_000);
+  }, 90_000);
 
   let cartId = "";
   let quoteId = "";

@@ -158,7 +158,9 @@ async function route() {
     app.innerHTML = '<input data-testid="search-input" name="searchTerm">' + JSON.stringify(feed).length;
   } else if (path.startsWith("/store/")) {
     const storeUuid = b64ToUuid(path.split("/")[3]);
-    const [store, drafts] = await Promise.all([api("getStoreV1", { storeUuid, diningMode: q.get("diningMode") || "DELIVERY", time: { asap: true } }), api("getDraftOrdersByEaterUuidV1", {})]);
+    // Opened directly, the real site ships the store inside the page and makes no store call.
+    const shipped = window.__SHIPPED__ && !window.__navigated ? window.__SHIPPED__ : null;
+    const [store, drafts] = await Promise.all([shipped || api("getStoreV1", { storeUuid, diningMode: q.get("diningMode") || "DELIVERY", time: { asap: true } }), api("getDraftOrdersByEaterUuidV1", {})]);
     const mine = drafts.draftOrders.find((d) => d.restaurantUUID === storeUuid);
     draft = mine ? mine.uuid : null;
     const items = Object.values(store.catalogSectionsMap).flat().flatMap((s) => s.payload.standardItemsPayload.catalogItems);
@@ -202,13 +204,14 @@ async function openDish(storeUuid, uuid) {
     close(); showCartBar();
   });
 }
+window.addEventListener("popstate", () => { window.__navigated = true; route(); });
 route();
 </script>`;
 
 export interface FakeUberEats {
   server: Server;
   origin: string;
-  state: { drafts: Map<string, { uuid: string; store: string; items: any[] }>; calls: string[]; breakRadios?: boolean; wrongSum?: boolean; emptySearch?: boolean; swapItem?: boolean };
+  state: { drafts: Map<string, { uuid: string; store: string; items: any[] }>; calls: string[]; ssr?: "encoded" | "plain" | "hidden"; breakRadios?: boolean; wrongSum?: boolean; emptySearch?: boolean; swapItem?: boolean };
   seedCart(items: { title: string; quantity: number }[]): void;
 }
 
@@ -220,7 +223,17 @@ export function startFakeUberEats(): Promise<FakeUberEats> {
     const send = (data: unknown) => res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ status: "success", data }));
     if (url.pathname === "/do-login") return void res.writeHead(302, { "set-cookie": "sid=fake; Path=/", location: "/feed" }).end();
     if (url.pathname === "/login-redirect/") return void res.writeHead(200, { "content-type": "text/html" }).end('<a id="go" href="/do-login">Sign in</a>');
-    if (!url.pathname.startsWith("/_p/api/")) return void res.writeHead(200, { "content-type": "text/html" }).end(PAGE);
+    if (!url.pathname.startsWith("/_p/api/")) {
+      let page = PAGE;
+      if (state.ssr && url.pathname.startsWith("/store/")) {
+        // Shapes seen in the wild: state nested under arbitrary keys, percent-encoded or plain JSON.
+        const nested = { routing: {}, stores: { [STORE]: { isFetching: false, data: STORE_DATA } } };
+        const text = state.ssr === "encoded" ? encodeURIComponent(JSON.stringify(nested)) : JSON.stringify(nested).replace(/</g, "\\u003c");
+        const tag = state.ssr === "hidden" ? "" : `<script type="application/json" id="__REDUX_STATE__">${text}</script>`;
+        page = PAGE.replace("<body>", `<body>${tag}<script>window.__SHIPPED__ = ${JSON.stringify(STORE_DATA)};</script>`);
+      }
+      return void res.writeHead(200, { "content-type": "text/html" }).end(page);
+    }
 
     let raw = "";
     req.on("data", (c) => (raw += c));
